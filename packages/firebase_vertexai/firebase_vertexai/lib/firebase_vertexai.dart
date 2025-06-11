@@ -53,11 +53,12 @@ export 'src/error.dart'
         ServerException,
         UnsupportedUserLocation;
 export 'src/firebase_vertexai.dart' show FirebaseVertexAI;
-export 'src/function_calling.dart'
+export 'src/tool.dart'
     show
         FunctionCallingConfig,
         FunctionCallingMode,
         FunctionDeclaration,
+        GoogleSearch,
         Tool,
         ToolConfig;
 export 'src/imagen_api.dart'

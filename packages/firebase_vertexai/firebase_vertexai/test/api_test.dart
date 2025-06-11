@@ -381,6 +381,27 @@ void main() {
         'threshold': 'BLOCK_LOW_AND_ABOVE',
       });
     });
+
+    group('GroundingMetadata', () {
+      test('constructor initializes fields correctly', () {
+        final searchEntrypoint =
+            SearchEntrypoint(renderedContent: '<div></div>');
+        final groundingChunk =
+            GroundingChunk(web: WebGroundingChunk(uri: 'uri'));
+        final groundingSupport = GroundingSupport(groundingChunkIndices: [0]);
+        final metadata = GroundingMetadata(
+          searchEntrypoint: searchEntrypoint,
+          groundingChunks: [groundingChunk],
+          groundingSupport: [groundingSupport],
+          webSearchQueries: ['web query'],
+        );
+
+        expect(metadata.searchEntrypoint, same(searchEntrypoint));
+        expect(metadata.groundingChunks.first, same(groundingChunk));
+        expect(metadata.groundingSupport.first, same(groundingSupport));
+        expect(metadata.webSearchQueries, ['web query']);
+      });
+    });
   });
 
   group('GenerationConfig & BaseGenerationConfig', () {
@@ -559,6 +580,238 @@ void main() {
         expect(response.usageMetadata!.totalTokenCount, 30);
         expect(response.usageMetadata!.promptTokensDetails, hasLength(1));
         expect(response.usageMetadata!.candidatesTokensDetails, hasLength(1));
+      });
+
+      group('groundingMetadata parsing', () {
+        test('parses valid response with full grounding metadata', () {
+          final jsonResponse = {
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'text': 'This is a grounded response.'}
+                  ]
+                },
+                'finishReason': 'STOP',
+                'groundingMetadata': {
+                  'webSearchQueries': ['query1', 'query2'],
+                  'searchEntrypoint': {'renderedContent': '<div></div>'},
+                  'groundingChunks': [
+                    {
+                      'web': {
+                        'uri': 'http://example.com/1',
+                        'title': 'Example Page 1',
+                      }
+                    }
+                  ],
+                  'groundingSupport': [
+                    {
+                      'segment': {
+                        'startIndex': 5,
+                        'endIndex': 13,
+                        'text': 'grounded'
+                      },
+                      'groundingChunkIndices': [0],
+                    }
+                  ]
+                }
+              }
+            ]
+          };
+
+          final response = parseGenerateContentResponse(jsonResponse);
+          final groundingMetadata = response.candidates.first.groundingMetadata;
+
+          expect(groundingMetadata, isNotNull);
+          expect(groundingMetadata!.webSearchQueries,
+              equals(['query1', 'query2']));
+          expect(groundingMetadata.searchEntrypoint?.renderedContent,
+              '<div></div>');
+
+          final groundingChunk = groundingMetadata.groundingChunks.first;
+          expect(groundingChunk.web?.uri, "http://example.com/1");
+          expect(groundingChunk.web?.title, "Example Page 1");
+          expect(groundingChunk.web?.domain, isNull);
+
+          final groundingSupport = groundingMetadata.groundingSupport.first;
+          expect(groundingSupport.segment?.startIndex, 5);
+          expect(groundingSupport.segment?.endIndex, 13);
+          expect(groundingSupport.segment?.partIndex, 0);
+          expect(groundingSupport.segment?.text, 'grounded');
+          expect(groundingSupport.groundingChunkIndices, [0]);
+        });
+
+        test('parses with empty or minimal grounding sub-components', () {
+          final jsonResponse = {
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'text': 'This is a grounded response.'}
+                  ]
+                },
+                'finishReason': 'STOP',
+                'groundingMetadata': {
+                  'webSearchQueries': ['query1', 'query2'],
+                  'searchEntrypoint': {},
+                  'groundingChunks': [
+                    {},
+                    {'web': {}},
+                  ],
+                  'groundingSupport': [
+                    {},
+                    {
+                      'groundingChunkIndices': [0],
+                    }
+                  ]
+                }
+              }
+            ]
+          };
+
+          final response = parseGenerateContentResponse(jsonResponse);
+          final groundingMetadata = response.candidates.first.groundingMetadata;
+
+          expect(groundingMetadata, isNotNull);
+          expect(groundingMetadata!.webSearchQueries,
+              equals(['query1', 'query2']));
+
+          expect(groundingMetadata.searchEntrypoint, isNotNull);
+          expect(groundingMetadata.searchEntrypoint?.renderedContent, '');
+
+          expect(groundingMetadata.groundingChunks[0].web, isNull);
+
+          expect(groundingMetadata.groundingChunks[1].web, isNotNull);
+          expect(groundingMetadata.groundingChunks[1].web?.uri, isNull);
+          expect(groundingMetadata.groundingChunks[1].web?.title, isNull);
+          expect(groundingMetadata.groundingChunks[1].web?.domain, isNull);
+
+          final firstSupport = groundingMetadata.groundingSupport[0];
+          expect(firstSupport.segment, isNull);
+          expect(firstSupport.groundingChunkIndices, isEmpty);
+
+          final secondSupport = groundingMetadata.groundingSupport[1];
+          expect(secondSupport.segment, isNull);
+          expect(secondSupport.groundingChunkIndices, [0]);
+        });
+
+        test(
+            'parses groundingMetadata with all optional fields null/missing and empty lists',
+            () {
+          final jsonResponse = {
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'text': 'Test'}
+                  ]
+                },
+                'finishReason': 'STOP',
+                'groundingMetadata': {
+                  // searchEntrypoint is missing
+                  // groundingChunks is missing (defaults to [])
+                  // groundingSupport is missing (defaults to [])
+                  // webSearchQueries is missing (defaults to [])
+                }
+              }
+            ]
+          };
+          final response = parseGenerateContentResponse(jsonResponse);
+          final groundingMetadata = response.candidates.first.groundingMetadata;
+
+          expect(groundingMetadata, isNotNull);
+          expect(groundingMetadata!.searchEntrypoint, isNull);
+          expect(groundingMetadata.groundingChunks, isEmpty);
+          expect(groundingMetadata.groundingSupport, isEmpty);
+          expect(groundingMetadata.webSearchQueries, isEmpty);
+        });
+
+        test('throws FormatException for invalid item in groundingChunks', () {
+          final json = {
+            'candidates': [
+              {
+                'groundingMetadata': {
+                  'groundingChunks': ['not_a_map']
+                }
+              }
+            ]
+          };
+          expect(
+              () => parseGenerateContentResponse(json),
+              throwsA(isA<VertexAISdkException>().having(
+                  (e) => e.message, 'message', contains('GroundingChunk'))));
+        });
+
+        test('throws FormatException for invalid item in groundingSupport', () {
+          final json = {
+            'candidates': [
+              {
+                'groundingMetadata': {
+                  'groundingSupport': ['not_a_map']
+                }
+              }
+            ]
+          };
+          expect(
+              () => parseGenerateContentResponse(json),
+              throwsA(isA<VertexAISdkException>().having(
+                  (e) => e.message, 'message', contains('GroundingSupport'))));
+        });
+
+        test('throws FormatException for invalid searchEntrypoint structure',
+            () {
+          final json = {
+            'candidates': [
+              {
+                'groundingMetadata': {'searchEntrypoint': 'not_a_map'}
+              }
+            ]
+          };
+          expect(
+              () => parseGenerateContentResponse(json),
+              throwsA(isA<VertexAISdkException>().having(
+                  (e) => e.message, 'message', contains('SearchEntrypoint'))));
+        });
+
+        test(
+            'throws FormatException for invalid segment structure in groundingSupport',
+            () {
+          final json = {
+            'candidates': [
+              {
+                'groundingMetadata': {
+                  'groundingSupport': [
+                    {'segment': 'not_a_map'}
+                  ]
+                }
+              }
+            ]
+          };
+          expect(
+              () => parseGenerateContentResponse(json),
+              throwsA(isA<VertexAISdkException>()
+                  .having((e) => e.message, 'message', contains('Segment'))));
+        });
+
+        test(
+            'throws FormatException for invalid web structure in groundingChunk',
+            () {
+          final json = {
+            'candidates': [
+              {
+                'groundingMetadata': {
+                  'groundingChunks': [
+                    {'web': 'not_a_map'}
+                  ]
+                }
+              }
+            ]
+          };
+          expect(
+              () => parseGenerateContentResponse(json),
+              throwsA(isA<VertexAISdkException>().having(
+                  (e) => e.message, 'message', contains('WebGroundingChunk'))));
+        });
       });
 
       test('parses JSON with no candidates (empty list)', () {

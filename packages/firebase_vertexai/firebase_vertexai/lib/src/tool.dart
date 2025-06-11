@@ -21,12 +21,16 @@ import 'schema.dart';
 /// knowledge and scope of the model.
 final class Tool {
   // ignore: public_member_api_docs
-  Tool._(this._functionDeclarations);
+  Tool._(this._functionDeclarations, this._googleSearch);
 
   /// Returns a [Tool] instance with list of [FunctionDeclaration].
   static Tool functionDeclarations(
       List<FunctionDeclaration> functionDeclarations) {
-    return Tool._(functionDeclarations);
+    return Tool._(functionDeclarations, null);
+  }
+
+  static Tool googleSearch({GoogleSearch googleSearch = const GoogleSearch()}) {
+    return Tool._(null, googleSearch);
   }
 
   /// A list of `FunctionDeclarations` available to the model that can be used
@@ -38,13 +42,23 @@ final class Tool {
   /// [FunctionResponse]
   /// with the role "function" generation context for the next model turn.
   final List<FunctionDeclaration>? _functionDeclarations;
+  final GoogleSearch? _googleSearch;
 
   /// Convert to json object.
   Map<String, Object> toJson() => {
         if (_functionDeclarations case final _functionDeclarations?)
           'functionDeclarations':
               _functionDeclarations.map((f) => f.toJson()).toList(),
+        if (_googleSearch case final _googleSearch?)
+          'googleSearch': _googleSearch.toJson()
       };
+}
+
+final class GoogleSearch {
+  const GoogleSearch();
+
+  // Convert to json object.
+  Map<String, Object> toJson() => {};
 }
 
 /// Structured representation of a function declaration as defined by the
